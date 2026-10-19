@@ -1,0 +1,27 @@
+name: play
+on:
+  schedule:
+    - cron: '47 11 * * *'
+  workflow_dispatch:
+jobs:
+  play:
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1
+      matrix:
+        agent: [steward, detailer]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: sudosilo/2026-10-18-orange-testbed
+          token: ${{ secrets.TESTBED_TOKEN }}
+          path: testbed
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: play one turn
+        env:
+          AGENT_KEY: ${{ matrix.agent == 'steward' && secrets.STEWARD_KEY || secrets.DETAILER_KEY }}
+          GH_TOKEN: ${{ secrets.TESTBED_TOKEN }}
+        run: node ${{ matrix.agent }}/agent.mjs testbed
