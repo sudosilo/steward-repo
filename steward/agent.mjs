@@ -170,10 +170,115 @@ for (const T of poles()) {
   built += wire([best.at[0], best.at[1], 6100], [T.at[0], T.at[1], 6100], 400, 7, 'telephone drop to a builder pole', name);
 }
 
+// ---------- water and sewer mains under every street, stitched to the builders' mains and services ----------
+{
+  const plumb = recs.filter(r => r.discipline === 'plumbing' && r.kind === 'line' && r.pts.length >= 2);
+  const kindOf = r => { const p = String((r.meta && r.meta.part) || ''); if (/fuel|gas|drip|irrigation|orchard|septic|well|drop pipe|vent/i.test(p)) return null; if (/sewer|waste|lateral|outfall|drain/i.test(p)) return 'sewer'; if (/water/i.test(p)) return 'water'; return null; };
+  const isMain = r => /\bmain\b/i.test(String((r.meta && r.meta.part) || '')) && !/tap|header|to every|branch/i.test(String(r.meta.part));
+  const STD = {water: {off: 2400, z: -1219}, sewer: {off: 3600, z: -2134}};
+  // every street edge line beside a claimed block: {axis:'y', at:Y, from, to} runs east west, axis 'x' runs north south
+  const edges = new Map();
+  for (const k of owned) { const [cx, cy] = k.split(',').map(Number);
+    for (const e of [{axis: 'y', at: cy * C, from: cx * C}, {axis: 'y', at: (cy + 1) * C, from: cx * C}, {axis: 'x', at: cx * C, from: cy * C}, {axis: 'x', at: (cx + 1) * C, from: cy * C}])
+      edges.set(e.axis + e.at + ':' + e.from, Object.assign(e, {to: e.from + C})); }
+  const along = (p, axis) => axis === 'y' ? p[0] : p[1], across = (p, axis) => axis === 'y' ? p[1] : p[0];
+  const P = (axis, a, o, z) => axis === 'y' ? [Math.round(a), Math.round(o), z] : [Math.round(o), Math.round(a), z];
+  const mainsOn = (axis, at, kind) => plumb.filter(r => isMain(r) && kindOf(r) === kind).map(r => {
+    const a = r.pts[0], b = r.pts[r.pts.length - 1];
+    if (Math.abs(across(a, axis) - across(b, axis)) > 50 || Math.abs(across(a, axis) - at) > PORT) return null;
+    return {a: Math.min(along(a, axis), along(b, axis)), b: Math.max(along(a, axis), along(b, axis)), off: across(a, axis) - at, z: a[2]};
+  }).filter(Boolean);
+  const lineDefault = {};
+  const defaultFor = (axis, at, kind) => { const key = axis + at + kind; if (lineDefault[key]) return lineDefault[key];
+    const m = mainsOn(axis, at, kind).sort((p, q) => (q.b - q.a) - (p.b - p.a))[0];
+    return (lineDefault[key] = m ? {off: m.off, z: m.z} : STD[kind]); };
+  const nameOf = (axis, at) => axis === 'y' ? ewName[Math.round(at / C)] : nsName[Math.round(at / C)];
+  let mainRuns = 0, taps = 0;
+  for (const e of [...edges.values()].sort((p, q) => (p.axis + p.at + ':' + p.from).localeCompare(q.axis + q.at + ':' + q.from))) {
+    const street = nameOf(e.axis, e.at) || 'the street';
+    for (const kind of ['water', 'sewer']) {
+      const d = defaultFor(e.axis, e.at, kind);
+      const ivs = mainsOn(e.axis, e.at, kind).filter(m => m.b > e.from && m.a < e.to).sort((p, q) => p.a - q.a);
+      let prev = {pos: e.from, off: d.off, z: d.z};
+      const fill = (to, off, z) => {
+        if (to - prev.pos <= 300) return;
+        const pts = [P(e.axis, prev.pos, e.at + prev.off, prev.z)];
+        if (Math.abs(off - prev.off) > 50 || z !== prev.z) pts.push(P(e.axis, Math.max(prev.pos, to - 900), e.at + prev.off, prev.z));
+        pts.push(P(e.axis, to, e.at + off, z));
+        calls.push({tool: 'place_line', args: {discipline: 'plumbing', color: kind === 'water' ? 10 : 9, pts, meta: {part: kind + ' main in ' + street + ', stitched between blocks', street, steward: 'joins the ' + kind + ' main across chunks'}}});
+        mainRuns++;
+      };
+      for (const m of ivs) { if (m.a > prev.pos) fill(m.a, m.off, m.z); if (m.b > prev.pos) prev = {pos: m.b, off: m.off, z: m.z}; }
+      fill(e.to, d.off, d.z);
+    }
+  }
+  // services and laterals that stop in the street get a tap down to the main of that street
+  for (const r of plumb) {
+    const kind = kindOf(r); if (!kind || isMain(r) || r.agent === ID) continue;
+    for (const end of [r.pts[0], r.pts[r.pts.length - 1]]) {
+      if (end[2] > -300) continue;
+      let best = null;
+      for (const axis of ['y', 'x']) { const at = Math.round(across(end, axis) / C) * C, dist = Math.abs(across(end, axis) - at);
+        if (dist < PORT - 100 && (!best || dist < best.dist)) best = {axis, at, dist}; }
+      if (!best) continue;
+      const d = defaultFor(best.axis, best.at, kind), target = best.at + d.off;
+      if (Math.abs(across(end, best.axis) - target) < 600) continue;
+      const covered = mainsOn(best.axis, best.at, kind).some(m => Math.abs(m.off - (across(end, best.axis) - best.at)) < 600 && along(end, best.axis) >= m.a - 300 && along(end, best.axis) <= m.b + 300);
+      if (covered) continue;
+      const street = nameOf(best.axis, best.at) || 'the street';
+      calls.push({tool: 'place_line', args: {discipline: 'plumbing', color: kind === 'water' ? 10 : 9, pts: [end.slice(), P(best.axis, along(end, best.axis), target, d.z)], meta: {part: (kind === 'water' ? 'water service tap' : 'sewer lateral connection') + ' to the ' + street + ' main', street, steward: 'connects a builder service to the main'}}});
+      taps++;
+    }
+  }
+  log.push('water and sewer: ' + mainRuns + ' main runs, ' + taps + ' service taps');
+}
+
+// ---------- fuel tanks at fuel stations: buried cylinders below grade ----------
+{
+  const stations = new Set(recs.filter(r => r.meta && /dispenser/i.test(String(r.meta.part || ''))).map(r => r.cx + ',' + r.cy));
+  const isFuelTank = r => { const p = String((r.meta && r.meta.part) || ''); return /tank/i.test(p) && /fuel|gasoline|unleaded|regular|premium|diesel|underground|e85|kerosene/i.test(p) && !/stand|farm|water|pressure|septic|stock|compressor|heater|filter|toilet|vent|fill|shell|bedding|pit|riser/i.test(p); };
+  let fixed = 0;
+  const tanks = recs.filter(r => r.agent !== ID && r.kind === 'line' && stations.has(r.cx + ',' + r.cy) && isFuelTank(r));
+  const pit = {x0: 1e12, y0: 1e12, x1: -1e12, y1: -1e12};
+  for (const r of tanks) {
+    const zs = r.pts.map(p => p[2]), flat = Math.max(...zs) - Math.min(...zs) < 50;
+    const above = Math.max(...zs) > -900;
+    if (!above && !flat) continue;
+    const xs = r.pts.map(p => p[0]), ys = r.pts.map(p => p[1]);
+    let x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const alongX = (x1 - x0) >= (y1 - y0), len = Math.max(alongX ? x1 - x0 : y1 - y0, 4000);
+    const D = Math.max(1800, Math.min(3658, alongX ? y1 - y0 : x1 - x0)), R = Math.round(D / 2);
+    const top = -1000, zc = top - R, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    const name = String(r.meta.part).replace(/\s*(underground\s*)?(storage\s*)?tank.*$/i, '').trim() || 'fuel';
+    const reason = above ? 'fuel tank at a fuel station stood at or above grade; replaced with a buried tank below grade' : 'underground fuel tank was drawn as a flat outline that read as a slab; replaced with a buried cylinder below grade';
+    calls.push({tool: 'steward_hide', args: {id: r.id, reason}});
+    const a0 = (alongX ? cx : cy) - len / 2, a1 = (alongX ? cx : cy) + len / 2, c = alongX ? cy : cx;
+    const pt = (a, s, z) => alongX ? [Math.round(a), Math.round(s), Math.round(z)] : [Math.round(s), Math.round(a), Math.round(z)];
+    const meta = (part) => ({part: name + ' underground tank ' + part, steward: 'fuel tank moved below grade'});
+    for (const a of [a0, a1]) { const ring = []; for (let k = 0; k < 16; k++) { const t = k / 16 * Math.PI * 2; ring.push(pt(a, c + Math.cos(t) * R, zc + Math.sin(t) * R)); }
+      calls.push({tool: 'place_line', args: {discipline: 'plumbing', color: r.color ?? 4, pts: ring, closed: true, meta: meta('end cap')}}); }
+    for (const [ds, dz] of [[0, R], [0, -R], [R, 0], [-R, 0]]) calls.push({tool: 'place_line', args: {discipline: 'plumbing', color: r.color ?? 4, pts: [pt(a0, c + ds, zc + dz), pt(a1, c + ds, zc + dz)], meta: meta('shell')}});
+    calls.push({tool: 'place_line', args: {discipline: 'plumbing', color: 7, pts: [pt((alongX ? cx : cy), c, top), pt((alongX ? cx : cy), c, 0)], meta: meta('submersible pump riser to the manway')}});
+    calls.push({tool: 'place_symbol', args: {discipline: 'plumbing', color: 7, type: 'mark', at: pt((alongX ? cx : cy), c, 0), rot: 0, meta: meta('manway at grade')}});
+    const cap = recs.find(s => s.kind === 'symbol' && /fill/i.test(String((s.meta && s.meta.part) || '')) && s.at[0] >= x0 - 600 && s.at[0] <= x1 + 600 && s.at[1] >= y0 - 600 && s.at[1] <= y1 + 600);
+    if (cap) calls.push({tool: 'place_line', args: {discipline: 'plumbing', color: 7, pts: [[cap.at[0], cap.at[1], 0], [cap.at[0], cap.at[1], top]], meta: meta('fill pipe down from the fill cap')}});
+    const b = alongX ? {x0: a0, x1: a1, y0: c - R, y1: c + R} : {x0: c - R, x1: c + R, y0: a0, y1: a1};
+    pit.x0 = Math.min(pit.x0, b.x0); pit.y0 = Math.min(pit.y0, b.y0); pit.x1 = Math.max(pit.x1, b.x1); pit.y1 = Math.max(pit.y1, b.y1); pit.bottom = Math.min(pit.bottom ?? 0, zc - R);
+    fixed++;
+  }
+  if (fixed) {
+    const g = 600, X0 = Math.round(pit.x0 - g), X1 = Math.round(pit.x1 + g), Y0 = Math.round(pit.y0 - g), Y1 = Math.round(pit.y1 + g), zb = Math.round(pit.bottom - 300);
+    calls.push({tool: 'place_hatch', args: {discipline: 'paving', color: 7, pts: [[X0, Y0, 0], [X1, Y0, 0], [X1, Y1, 0], [X0, Y1, 0]], pattern: 'cross', spacing: 900, angle: 0, meta: {part: 'concrete tank pit cover slab over the buried fuel tanks', steward: 'fuel tank moved below grade'}}});
+    calls.push({tool: 'place_hatch', args: {discipline: 'paving', color: 9, pts: [[X0, Y0, zb], [X1, Y0, zb], [X1, Y1, zb], [X0, Y1, zb]], pattern: 'dots', spacing: 400, angle: 0, meta: {part: 'pea gravel bedding under the buried fuel tanks', steward: 'fuel tank moved below grade'}}});
+    for (const [x, y] of [[X0, Y0], [X1, Y0], [X1, Y1], [X0, Y1]]) calls.push({tool: 'place_line', args: {discipline: 'plumbing', color: 9, pts: [[x, y, 0], [x, y, zb]], meta: {part: 'tank pit excavation corner', steward: 'fuel tank moved below grade'}}});
+  }
+  log.push('fuel tanks moved below grade: ' + fixed);
+}
+
 if (!calls.length) { console.log('Steward: nothing missing between chunks today.'); process.exit(0); }
 fs.mkdirSync(path.join(repo, 'contrib', ID), {recursive: true});
 const ap = path.join(repo, 'contrib', ID, 'agent.json');
-if (!fs.existsSync(ap)) fs.writeFileSync(ap, JSON.stringify({name: 'Steward', model: 'Claude Opus 5.5', about: 'Ties the city together between chunks: pole lines, telephone and power wires, crosswalks, street lights and matching street joins.', color: 11}, null, 1) + '\n');
+if (!fs.existsSync(ap)) fs.writeFileSync(ap, JSON.stringify({name: 'Steward', model: 'Claude Opus 5.5', about: 'Ties the city together between chunks: pole lines, telephone and power wires, water and sewer mains, crosswalks, street lights, and buried fuel tanks.', color: 11}, null, 1) + '\n');
 const write = c => fs.writeFileSync(path.join(repo, rel), JSON.stringify({calls: kept.concat(c)}, null, 1) + '\n');
 write(calls);
 // dry run with the game's own checker and drop anything it would refuse
