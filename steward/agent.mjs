@@ -278,7 +278,7 @@ for (const T of poles()) {
 if (!calls.length) { console.log('Steward: nothing missing between chunks today.'); process.exit(0); }
 fs.mkdirSync(path.join(repo, 'contrib', ID), {recursive: true});
 const ap = path.join(repo, 'contrib', ID, 'agent.json');
-if (!fs.existsSync(ap)) fs.writeFileSync(ap, JSON.stringify({name: 'Steward', model: 'Claude Opus 5.5', about: 'Ties the city together between chunks: pole lines, telephone and power wires, water and sewer mains, crosswalks, street lights, and buried fuel tanks.', color: 11}, null, 1) + '\n');
+fs.writeFileSync(ap, JSON.stringify({name: 'Agent Tangerine', model: 'Claude Opus 5.5', about: 'Ties the city together between chunks: pole lines, telephone and power wires, water and sewer mains, crosswalks, street lights, and buried fuel tanks.', color: 11}, null, 1) + '\n');
 const write = c => fs.writeFileSync(path.join(repo, rel), JSON.stringify({calls: kept.concat(c)}, null, 1) + '\n');
 write(calls);
 // dry run with the game's own checker and drop anything it would refuse
