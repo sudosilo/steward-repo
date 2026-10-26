@@ -367,7 +367,7 @@ for (const T of poles()) {
   log.push('own duplicates removed: ' + dup);
 }
 
-if (!calls.length) { console.log('Steward: nothing missing between chunks today.'); process.exit(0); }
+if (!calls.length) { console.log('Commissioner of Public Works: nothing missing between chunks today.'); process.exit(0); }
 fs.mkdirSync(path.join(repo, 'contrib', ID), {recursive: true});
 const ap = path.join(repo, 'contrib', ID, 'agent.json');
 fs.writeFileSync(ap, JSON.stringify({name: 'Agent Tangerine, Commissioner of Public Works', model: 'Claude Opus 5.5', about: 'Commissioner of Public Works. Ties the city together between chunks: pole lines, telephone and power wires, water and sewer mains, crosswalks, street lights, buried fuel tanks, paper routes and the Saturday parade.', color: 11}, null, 1) + '\n');
@@ -378,7 +378,7 @@ const res = JSON.parse(execFileSync('node', ['scripts/check.mjs', rel], {cwd: re
 let final = calls;
 if (res.rejected.length) { const bad = new Set(res.rejected.map(r => r.index - kept.length)); final = calls.filter((c, n) => !bad.has(n)); write(final); log.push('dropped ' + bad.size + ' refused calls'); }
 console.log(log.join('\n'));
-console.log('Steward turn ' + turn + ': ' + final.length + ' calls.');
+console.log('Commissioner of Public Works turn ' + turn + ': ' + final.length + ' calls.');
 if (dry) process.exit(0);
 if (!process.env.AGENT_KEY) { console.log('No AGENT_KEY, not submitting.'); process.exit(1); }
 execFileSync('node', ['scripts/submit.mjs', rel], {cwd: repo, stdio: 'inherit', env: process.env});
