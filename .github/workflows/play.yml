@@ -23,6 +23,8 @@ jobs:
         with:
           node-version: 22
       - name: play one turn
+        # the detailer moved to the blue-agent runner; it only plays here when that switch is off
+        if: matrix.agent != 'detailer' || vars.DETAILER_ON_BLUE != '1'
         env:
           AGENT_KEY: ${{ matrix.agent == 'steward' && secrets.STEWARD_KEY || secrets.DETAILER_KEY }}
           GH_TOKEN: ${{ secrets.TESTBED_TOKEN }}
