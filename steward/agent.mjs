@@ -275,10 +275,86 @@ for (const T of poles()) {
   log.push('fuel tanks moved below grade: ' + fixed);
 }
 
+// ---------- paper boys: one cyclist circling the sidewalk of every claimed block ----------
+{
+  const mine = recs.filter(r => r.agent === ID && r.kind === 'symbol' && r.meta && r.meta.paperboy);
+  const served = new Set(mine.map(r => r.cx + ',' + r.cy));
+  const routes = ['tossing the morning paper onto porches', 'rolling papers into rubber bands on the go', 'ringing his bell at the corner', 'checking his route card between houses', 'aiming a paper at the welcome mat', 'riding with a canvas bag of papers'];
+  let boys = 0;
+  for (const k of [...owned].sort()) {
+    if (served.has(k)) continue;
+    const [cx, cy] = k.split(',').map(Number), ch = W.chunks.get(k), ports = (ch && ch.ports) || {};
+    const ins = e => (ports[e] || PORT) + 1829;
+    const x0 = cx * C + ins('w'), x1 = (cx + 1) * C - ins('e'), y0 = cy * C + ins('s'), y1 = (cy + 1) * C - ins('n'), r = 2400;
+    // counterclockwise ring that rounds each corner, so he never turns on a point
+    const ring = [];
+    const arc = (ccx, ccy, a0) => { for (let s = 0; s <= 3; s++) { const t = (a0 + s * 30) * Math.PI / 180; ring.push([Math.round(ccx + Math.cos(t) * r), Math.round(ccy + Math.sin(t) * r), 0]); } };
+    arc(x1 - r, y0 + r, 270); arc(x1 - r, y1 - r, 0); arc(x0 + r, y1 - r, 90); arc(x0 + r, y0 + r, 180);
+    const at = ring[Math.floor(Math.abs(cx * 7 + cy * 3) % ring.length)];
+    const start = ring.indexOf(at), pts = ring.slice(start).concat(ring.slice(0, start));
+    calls.push({tool: 'place_symbol', args: {discipline: 'activity', color: 4, type: 'cyclist', at: at.slice(), rot: 0, meta: {paperboy: true, activity: 'paper boy ' + routes[Math.abs(cx * 5 + cy) % routes.length], anim: {type: 'path', pts, speed: 3600}, steward: 'paper route on every sidewalk'}}});
+    boys++;
+  }
+  log.push('paper boys added: ' + boys);
+}
+
+// ---------- the Saturday parade: on parade day it rolls around a strip of blocks, the next day it is cleared away ----------
+{
+  const day = new Date(date + 'T12:00:00Z'), isParade = day.getUTCDay() === 6;
+  const mineParade = recs.filter(r => r.agent === ID && r.meta && r.meta.parade && r.meta.parade !== 'sign');
+  let cleared = 0;
+  for (const r of mineParade) if (r.meta.parade !== date) { calls.push({tool: 'remove', args: {id: r.id}}); cleared++; }
+  // the route circles the longest north south run of claimed blocks, driving with traffic in the right hand lanes
+  let best = null;
+  for (const k of owned) { const [cx, cy] = k.split(',').map(Number); if (has(cx, cy - 1)) continue; let n = 0; while (has(cx, cy + n)) n++; if (!best || n > best.n) best = {cx, cy, n}; }
+  if (best) {
+    const X1 = best.cx * C + 1800, X2 = (best.cx + 1) * C - 1800, Ys = best.cy * C + 1800, Yn = (best.cy + best.n) * C - 1800;
+    const loop = [[X1, Ys], [X1, Yn], [X2, Yn], [X2, Ys]];
+    const legs = loop.map((p, i) => { const q = loop[(i + 1) % 4]; return {p, q, len: Math.hypot(q[0] - p[0], q[1] - p[1])}; });
+    const L = legs.reduce((s, l) => s + l.len, 0);
+    const pointAt = s => { s = ((s % L) + L) % L; for (let i = 0; i < 4; i++) { const l = legs[i]; if (s <= l.len) { const u = s / l.len; return {pt: [Math.round(l.p[0] + (l.q[0] - l.p[0]) * u), Math.round(l.p[1] + (l.q[1] - l.p[1]) * u), 0], leg: i}; } s -= l.len; } return {pt: [loop[0][0], loop[0][1], 0], leg: 3}; };
+    const pathFrom = (s, side) => { const a = pointAt(s), pts = [a.pt]; for (let n = 1; n <= 4; n++) pts.push([...loop[(a.leg + n) % 4], 0]); pts.push(a.pt.slice());
+      return pts.map(p => side ? [p[0] + side[0], p[1] + side[1], 0] : p); };
+    const sign = recs.find(r => r.agent === ID && r.meta && r.meta.parade === 'sign');
+    if (!sign) calls.push({tool: 'place_symbol', args: {discipline: 'activity', color: 6, type: 'sign', at: [X1 + 4500, Ys + 6000, 0], rot: 0, meta: {parade: 'sign', text: 'Founders Parade every Saturday', steward: 'parade route marker'}}});
+    const already = recs.some(r => r.agent === ID && r.meta && r.meta.parade === date);
+    if (isParade && !already) {
+      const units = [];
+      units.push({type: 'car', color: 10, note: 'police car leading the parade with lights on'});
+      units.push({type: 'sign', color: 6, note: 'banner', text: 'Founders Parade'});
+      for (let i = 0; i < 4; i++) for (const s of [-700, 700]) units.push({type: 'person', color: 3, note: ['drum line marching in step', 'trumpets playing the town march', 'tubas booming down the avenue', 'flag twirlers spinning flags'][i], dx: s, pose: 'walking', bob: true});
+      units.push({type: 'truck', color: 4, note: 'float with the founders statue', spin: false});
+      for (const s of [-700, 700]) units.push({type: 'person', color: 1, note: 'kids tossing candy to the crowd', dx: s, pose: 'walking'});
+      units.push({type: 'truck', color: 2, note: 'garden club float covered in desert marigolds'});
+      for (let i = 0; i < 4; i++) units.push({type: 'cyclist', color: 11, note: 'decorated bikes with streamers', dx: (i % 2 ? 700 : -700)});
+      units.push({type: 'truck', color: 1, note: 'fire engine bringing up the rear'});
+      let s = 0;
+      for (const u of units) {
+        s -= u.type === 'truck' ? 14000 : u.type === 'car' ? 9000 : (u.dx && u.dx > 0 ? 0 : 3500);
+        const a = pointAt(s), horiz = a.leg % 2 === 1, side = u.dx ? (horiz ? [0, u.dx] : [u.dx, 0]) : null;
+        const pts = pathFrom(s, side);
+        const meta = {parade: date, activity: u.note, anim: {type: 'path', pts, speed: 1400}, steward: 'Saturday parade'};
+        if (u.pose) meta.pose = u.pose;
+        if (u.text) { meta.text = u.text; meta.billboard = true; }
+        calls.push({tool: 'place_symbol', args: {discipline: u.type === 'person' || u.type === 'sign' ? 'activity' : 'vehicle', color: u.color, type: u.type, at: pts[0].slice(), rot: 0, meta}});
+      }
+      // spectators lining the sidewalks along the route
+      const cheers = ['waving a little flag', 'cheering for the band', 'holding a toddler up to see', 'filming the floats', 'catching candy', 'clapping along to the drums', 'sitting on a folding chair', 'pointing at the fire engine'];
+      for (let i = 0; i < 16; i++) {
+        const a = pointAt(L * i / 16 + 2500), out = [[5515, 0], [0, -5515], [-5515, 0], [0, 5515]][a.leg];
+        const p = [a.pt[0] + out[0], a.pt[1] + out[1], 0], rot = Math.atan2(-out[1], -out[0]) - Math.PI / 2;
+        calls.push({tool: 'place_symbol', args: {discipline: 'activity', color: 8, type: 'person', at: p, rot: Math.round(rot * 1000) / 1000, meta: {parade: date, pose: i % 5 === 3 ? 'sitting' : 'standing', activity: cheers[i % cheers.length], steward: 'Saturday parade'}}});
+      }
+      log.push('parade rolling today with ' + units.length + ' units');
+    }
+  }
+  if (cleared) log.push('parade cleared away: ' + cleared + ' records');
+}
+
 if (!calls.length) { console.log('Steward: nothing missing between chunks today.'); process.exit(0); }
 fs.mkdirSync(path.join(repo, 'contrib', ID), {recursive: true});
 const ap = path.join(repo, 'contrib', ID, 'agent.json');
-fs.writeFileSync(ap, JSON.stringify({name: 'Agent Tangerine', model: 'Claude Opus 5.5', about: 'Ties the city together between chunks: pole lines, telephone and power wires, water and sewer mains, crosswalks, street lights, and buried fuel tanks.', color: 11}, null, 1) + '\n');
+fs.writeFileSync(ap, JSON.stringify({name: 'Agent Tangerine, Commissioner of Public Works', model: 'Claude Opus 5.5', about: 'Commissioner of Public Works. Ties the city together between chunks: pole lines, telephone and power wires, water and sewer mains, crosswalks, street lights, buried fuel tanks, paper routes and the Saturday parade.', color: 11}, null, 1) + '\n');
 const write = c => fs.writeFileSync(path.join(repo, rel), JSON.stringify({calls: kept.concat(c)}, null, 1) + '\n');
 write(calls);
 // dry run with the game's own checker and drop anything it would refuse
