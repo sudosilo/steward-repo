@@ -2,6 +2,8 @@ name: play
 on:
   schedule:
     - cron: '47 11 * * *'
+    - cron: '0 13 * * *'
+    - cron: '0 15 * * *'
   workflow_dispatch:
 jobs:
   play:

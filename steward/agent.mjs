@@ -10,13 +10,13 @@ const repo = path.resolve(process.argv[2] || '.');
 const dry = process.argv.includes('--dry');
 const ID = 'steward';
 const date = new Date().toISOString().slice(0, 10);
-const rel = 'contrib/' + ID + '/' + date + '.json';
+const turn = new Date().toISOString().replace(/[-:]/g, '').replace(/^(\d{4})(\d{2})(\d{2})T(\d{6}).*$/, '$1-$2-$3T$4');
+const rel = 'contrib/' + ID + '/' + turn + '.json';
 const {replay} = await import(path.join(repo, 'engine.js'));
 const {loadContrib, loadConfig} = await import(path.join(repo, 'scripts/load.mjs'));
 
 const C = 79248, PORT = 5486, LINE = PORT + 900;
-let kept = [];
-try { const j = JSON.parse(fs.readFileSync(path.join(repo, rel), 'utf8')); kept = (Array.isArray(j) ? j : j.calls) || []; } catch (e) {}
+const kept = [];
 const {files} = loadContrib(repo);
 const W = replay(files, null, loadConfig(repo));
 const recs = [];
@@ -184,9 +184,11 @@ for (const T of poles()) {
   const along = (p, axis) => axis === 'y' ? p[0] : p[1], across = (p, axis) => axis === 'y' ? p[1] : p[0];
   const P = (axis, a, o, z) => axis === 'y' ? [Math.round(a), Math.round(o), z] : [Math.round(o), Math.round(a), z];
   const mainsOn = (axis, at, kind) => plumb.filter(r => isMain(r) && kindOf(r) === kind).map(r => {
-    const a = r.pts[0], b = r.pts[r.pts.length - 1];
-    if (Math.abs(across(a, axis) - across(b, axis)) > 50 || Math.abs(across(a, axis) - at) > PORT) return null;
-    return {a: Math.min(along(a, axis), along(b, axis)), b: Math.max(along(a, axis), along(b, axis)), off: across(a, axis) - at, z: a[2]};
+    const al = r.pts.map(p => along(p, axis)), ac = r.pts.map(p => across(p, axis));
+    if (ac.some(v => Math.abs(v - at) > PORT)) return null;
+    const spanA = Math.max(...al) - Math.min(...al), spanC = Math.max(...ac) - Math.min(...ac);
+    if (spanA < 4 * spanC || spanA < 300) return null;
+    return {a: Math.min(...al), b: Math.max(...al), off: ac[0] - at, z: r.pts[0][2]};
   }).filter(Boolean);
   const lineDefault = {};
   const defaultFor = (axis, at, kind) => { const key = axis + at + kind; if (lineDefault[key]) return lineDefault[key];
@@ -212,11 +214,13 @@ for (const T of poles()) {
       fill(e.to, d.off, d.z);
     }
   }
-  // services and laterals that stop in the street get a tap down to the main of that street
+  // services and laterals that stop in the street get a tap down to the main of that street, once
+  const myTapStarts = new Set(plumb.filter(r => r.agent === ID).map(r => r.pts[0].join(',')));
   for (const r of plumb) {
     const kind = kindOf(r); if (!kind || isMain(r) || r.agent === ID) continue;
     for (const end of [r.pts[0], r.pts[r.pts.length - 1]]) {
       if (end[2] > -300) continue;
+      if (myTapStarts.has(end.join(','))) continue;
       let best = null;
       for (const axis of ['y', 'x']) { const at = Math.round(across(end, axis) / C) * C, dist = Math.abs(across(end, axis) - at);
         if (dist < PORT - 100 && (!best || dist < best.dist)) best = {axis, at, dist}; }
@@ -278,7 +282,10 @@ for (const T of poles()) {
 // ---------- paper boys: one cyclist circling the sidewalk of every claimed block ----------
 {
   const mine = recs.filter(r => r.agent === ID && r.kind === 'symbol' && r.meta && r.meta.paperboy);
-  const served = new Set(mine.map(r => r.cx + ',' + r.cy));
+  // paper delivery hours are 6 to 8 in the morning, Arizona time; outside them the paper boys go home
+  const azHour = (new Date().getUTCHours() + 24 - 7) % 24, onRoute = process.env.PAPER_ROUTE ? process.env.PAPER_ROUTE === 'on' : (azHour >= 6 && azHour < 8);
+  if (!onRoute) { for (const r of mine) calls.push({tool: 'remove', args: {id: r.id}}); log.push('paper boys off duty: ' + mine.length + ' sent home'); }
+  const served = new Set(onRoute ? mine.map(r => r.cx + ',' + r.cy) : [...owned]);
   const routes = ['tossing the morning paper onto porches', 'rolling papers into rubber bands on the go', 'ringing his bell at the corner', 'checking his route card between houses', 'aiming a paper at the welcome mat', 'riding with a canvas bag of papers'];
   let boys = 0;
   for (const k of [...owned].sort()) {
@@ -351,6 +358,15 @@ for (const T of poles()) {
   if (cleared) log.push('parade cleared away: ' + cleared + ' records');
 }
 
+// ---------- clean up: remove the steward's own records that were drawn twice ----------
+{
+  const seen = new Set(); let dup = 0;
+  for (const r of recs) { if (r.agent !== ID || !r.id) continue;
+    const key = r.kind + '|' + r.discipline + '|' + JSON.stringify(r.kind === 'symbol' ? [r.type, r.at, r.meta && r.meta.anim] : r.pts) + '|' + String((r.meta && r.meta.part) || '');
+    if (seen.has(key)) { calls.push({tool: 'remove', args: {id: r.id}}); dup++; } else seen.add(key); }
+  log.push('own duplicates removed: ' + dup);
+}
+
 if (!calls.length) { console.log('Steward: nothing missing between chunks today.'); process.exit(0); }
 fs.mkdirSync(path.join(repo, 'contrib', ID), {recursive: true});
 const ap = path.join(repo, 'contrib', ID, 'agent.json');
@@ -362,7 +378,7 @@ const res = JSON.parse(execFileSync('node', ['scripts/check.mjs', rel], {cwd: re
 let final = calls;
 if (res.rejected.length) { const bad = new Set(res.rejected.map(r => r.index - kept.length)); final = calls.filter((c, n) => !bad.has(n)); write(final); log.push('dropped ' + bad.size + ' refused calls'); }
 console.log(log.join('\n'));
-console.log('Steward turn ' + date + ': ' + final.length + ' calls.');
+console.log('Steward turn ' + turn + ': ' + final.length + ' calls.');
 if (dry) process.exit(0);
 if (!process.env.AGENT_KEY) { console.log('No AGENT_KEY, not submitting.'); process.exit(1); }
 execFileSync('node', ['scripts/submit.mjs', rel], {cwd: repo, stdio: 'inherit', env: process.env});

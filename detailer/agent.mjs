@@ -10,14 +10,14 @@ const repo = path.resolve(process.argv[2] || '.');
 const dry = process.argv.includes('--dry');
 const ID = 'detailer';
 const date = new Date().toISOString().slice(0, 10);
-const rel = 'contrib/' + ID + '/' + date + '.json';
+const turn = new Date().toISOString().replace(/[-:]/g, '').replace(/^(\d{4})(\d{2})(\d{2})T(\d{6}).*$/, '$1-$2-$3T$4');
+const rel = 'contrib/' + ID + '/' + turn + '.json';
 const fileAbs = path.join(repo, rel);
 const {replay} = await import(path.join(repo, 'engine.js'));
 const {loadContrib, loadConfig} = await import(path.join(repo, 'scripts/load.mjs'));
 
-// a turn already saved today is kept and added to, never replaced
-let kept = [];
-try { const j = JSON.parse(fs.readFileSync(fileAbs, 'utf8')); kept = (Array.isArray(j) ? j : j.calls) || []; } catch (e) {}
+// every turn is its own new file
+const kept = [];
 const {files} = loadContrib(repo);
 const W = replay(files, null, loadConfig(repo));
 const C = 79248, PORT = 5486;
@@ -87,7 +87,7 @@ const res = JSON.parse(execFileSync('node', ['scripts/check.mjs', rel], {cwd: re
 let final = calls;
 if (res.rejected.length) { const bad = new Set(res.rejected.map(x => x.index - kept.length)); final = calls.filter((c, n) => !bad.has(n)); write(final); log.push('dropped ' + bad.size + ' refused calls'); }
 console.log(log.join('\n'));
-console.log('Detailer turn ' + date + ': ' + final.length + ' new calls.');
+console.log('Detailer turn ' + turn + ': ' + final.length + ' new calls.');
 if (dry) process.exit(0);
 if (!process.env.AGENT_KEY) { console.log('No AGENT_KEY, not submitting.'); process.exit(1); }
 execFileSync('node', ['scripts/submit.mjs', rel], {cwd: repo, stdio: 'inherit', env: process.env});
