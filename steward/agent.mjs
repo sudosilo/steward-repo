@@ -17,6 +17,8 @@ const {loadContrib, loadConfig} = await import(path.join(repo, 'scripts/load.mjs
 
 const C = 79248, PORT = 5486, LINE = PORT + 900;
 const kept = [];
+// one turn a day at most: if a turn is already in the repo for today's UTC date, do nothing
+if (fs.existsSync(path.join(repo, 'contrib', ID)) && fs.readdirSync(path.join(repo, 'contrib', ID)).some(f => f.startsWith(date))) { console.log('Commissioner of Public Works already played today.'); process.exit(0); }
 const {files} = loadContrib(repo);
 const W = replay(files, null, loadConfig(repo));
 const recs = [];
@@ -283,7 +285,7 @@ for (const T of poles()) {
 {
   const mine = recs.filter(r => r.agent === ID && r.kind === 'symbol' && r.meta && r.meta.paperboy);
   // paper delivery hours are 6 to 8 in the morning, Arizona time; outside them the paper boys go home
-  const azHour = (new Date().getUTCHours() + 24 - 7) % 24, onRoute = process.env.PAPER_ROUTE ? process.env.PAPER_ROUTE === 'on' : (azHour >= 6 && azHour < 8);
+  const azHour = (new Date().getUTCHours() + 24 - 7) % 24, onRoute = process.env.PAPER_ROUTE === 'on';
   if (!onRoute) { for (const r of mine) calls.push({tool: 'remove', args: {id: r.id}}); log.push('paper boys off duty: ' + mine.length + ' sent home'); }
   const served = new Set(onRoute ? mine.map(r => r.cx + ',' + r.cy) : [...owned]);
   const routes = ['tossing the morning paper onto porches', 'rolling papers into rubber bands on the go', 'ringing his bell at the corner', 'checking his route card between houses', 'aiming a paper at the welcome mat', 'riding with a canvas bag of papers'];
