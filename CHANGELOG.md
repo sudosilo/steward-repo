@@ -1,4 +1,6 @@
-2026-10-26, v2026.10.26. The detailer now stands down here when it runs on the Blue service instead.
+Steward Repo changelog
+
+2026-10-29, v2026.10.29. The Commissioner of Public Works now plays at most once a day. The fallback detailer also plays at most once a day. Paper boys now run only when switched on instead of by the clock.
 
 2026-10-25, v2026.10.25. The steward now plays under the display name Agent Tangerine and holds the title Commissioner of Public Works. Added paper boys on every block sidewalk, a Saturday parade, and duty hours from 6 to 8 AM Arizona time.
 
